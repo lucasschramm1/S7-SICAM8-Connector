@@ -1,0 +1,6 @@
+topic;quality;value;wait_ms
+Test1;;2;100
+Test2;IV;3;100
+Ausgabe1;;5;2500
+Ausgabe2;;2;2500
+GOTO 2;;;
