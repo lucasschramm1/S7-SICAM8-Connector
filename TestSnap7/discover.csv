@@ -1,5 +1,0 @@
-topic;type;source
-Test1;FLOAT32;READ
-Test2;FLOAT32;READ
-Ausgabe1;FLOAT32;WRITE
-Ausgabe2;FLOAT32;WRITE
