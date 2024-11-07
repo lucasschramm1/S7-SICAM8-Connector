@@ -1,5 +1,5 @@
 /* This work is licensed under a Creative Commons CCZero 1.0 Universal License.
- * See http://creativecommons.org/publicdomain/zero/1.0/ for more information. 
+ * See http://creativecommons.org/publicdomain/zero/1.0/ for more information.
  *
  *    Copyright 2019 (c) Fraunhofer IOSB (Author: Julius Pfrommer)
  */
@@ -15,12 +15,7 @@
 #include <mbedtls/x509_crt.h>
 #include <mbedtls/ctr_drbg.h>
 
-#if !defined(MBEDTLS_NO_PLATFORM_ENTROPY)
-#define MBEDTLS_ENTROPY_POLL_METHOD mbedtls_platform_entropy_poll
-#else
 // MBEDTLS_ENTROPY_HARDWARE_ALT should be defined if your hardware does not supportd platform entropy
-#define MBEDTLS_ENTROPY_POLL_METHOD mbedtls_hardware_poll
-#endif
 
 #define UA_SHA1_LENGTH 20
 
@@ -62,9 +57,9 @@ mbedtls_encrypt_rsaOaep(mbedtls_rsa_context *context,
 UA_StatusCode
 mbedtls_decrypt_rsaOaep(mbedtls_pk_context *localPrivateKey,
                         mbedtls_ctr_drbg_context *drbgContext,
-                        UA_ByteString *data);
+                        UA_ByteString *data, int hash_id);
 
-int UA_mbedTLS_LoadPrivateKey(const UA_ByteString *key, mbedtls_pk_context *target);
+int UA_mbedTLS_LoadPrivateKey(const UA_ByteString *key, mbedtls_pk_context *target, void *p_rng);
 
 UA_StatusCode UA_mbedTLS_LoadLocalCertificate(const UA_ByteString *certData, UA_ByteString *target);
 

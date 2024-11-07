@@ -1,6 +1,14 @@
 topic;quality;value;wait_ms
-Test1;;2;100
-Test2;IV;3;100
-Ausgabe1;;5;2500
-Ausgabe2;;2;2500
-GOTO 2;;;
+Test1;;1;10
+Test2;;2;10
+Test3;;8;10
+Test4;;18.19;10
+Test5;;1;10
+Test6;;2;10
+Test7;;1;10
+Test8;;2;10
+Test9;;8;10
+Test10;;18.19;10
+Test11;;1;10
+Test12;;2;9890
+GOTO2;;;

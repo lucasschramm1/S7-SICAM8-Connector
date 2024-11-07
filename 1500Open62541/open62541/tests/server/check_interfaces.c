@@ -24,6 +24,7 @@ static UA_Server *server = NULL;
 
 static void setup(void) {
     server = UA_Server_new();
+    ck_assert(server != NULL);
     UA_ServerConfig_setDefault(UA_Server_getConfig(server));
 
     UA_StatusCode setupResult = namespace_tests_interfaces_generated(server);
@@ -56,7 +57,7 @@ START_TEST(check_interface_instantiation) {
 
     UA_BrowsePathResult bpr = UA_Server_translateBrowsePathToNodeIds(server, &bp);
     ck_assert_int_eq(bpr.statusCode, UA_STATUSCODE_GOOD);
-    ck_assert_int_eq(bpr.targetsSize, 1);
+    ck_assert_uint_eq(bpr.targetsSize, 1);
 
     const UA_NodeId objectWithInterfacesId = bpr.targets->targetId.nodeId;
     UA_BrowsePathResult_clear(&bpr);
@@ -73,7 +74,7 @@ START_TEST(check_interface_instantiation) {
 
     UA_BrowseResult br = UA_Server_browse(server, 1000, &bd);
     ck_assert_int_eq(br.statusCode, UA_STATUSCODE_GOOD);
-    ck_assert_int_gt(br.referencesSize, 0);
+    ck_assert_uint_gt(br.referencesSize, 0);
 
     bool found = false;
     for (size_t i = 0; i < br.referencesSize; ++i) {
@@ -150,7 +151,7 @@ START_TEST(check_interface_instantiation) {
 
     bpr = UA_Server_translateBrowsePathToNodeIds(server, &bp);
     ck_assert_int_eq(bpr.statusCode, UA_STATUSCODE_GOOD);
-    ck_assert_int_eq(bpr.targetsSize, 1);
+    ck_assert_uint_eq(bpr.targetsSize, 1);
 
     const UA_NodeId baseObjectWithInterfaceId = bpr.targets->targetId.nodeId;
     UA_BrowsePathResult_clear(&bpr);
@@ -164,7 +165,7 @@ START_TEST(check_interface_instantiation) {
 
     br = UA_Server_browse(server, 1000, &bd);
     ck_assert_int_eq(br.statusCode, UA_STATUSCODE_GOOD);
-    ck_assert_int_gt(br.referencesSize, 0);
+    ck_assert_uint_gt(br.referencesSize, 0);
 
     found = false;
     for (size_t i = 0; i < br.referencesSize; ++i) {

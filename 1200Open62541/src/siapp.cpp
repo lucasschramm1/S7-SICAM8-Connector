@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: MIT
  * Copyright 2024 Siemens AG
  *
- * Authors:
- *    Lukas Wimmer <lukas.wimmer@siemens.com>
- *    Lucas Schramm <lucas.schramm@siemens.com>
+ * Authors of this file:
+ *    Lukas Wimmer <lukas.wimmer@siemens.com> (SIAPP SDK Basic Functions)
+ *    Lucas Schramm <lucas.schramm@siemens.com> (Specific Functions for implementation of OPC UA Client)
  */
 
 #include <stdlib.h>
@@ -22,19 +22,22 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <iostream>
+#include <fstream>
 #include <map>
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+#include <openssl/err.h>
 #include <open62541/client.h>
 #include <open62541/client_highlevel.h>
 #include <open62541/client_config_default.h>
 #include <open62541/client_subscriptions.h>
+#include <open62541/plugin/securitypolicy.h>
 #include "ReadSignals.h"
 #include "WriteSignals.h"
 #include "Info.h"
-
-#define EVENTS_LENGTH 50
 
 using namespace std;
 
@@ -44,7 +47,6 @@ static pthread_mutex_t s_mutex;
 static pthread_mutex_t s_mutex_event;
 static pthread_mutex_t s_mutex_log;
 
-static bool s_connected = false;
 static vector<T_EDGE_DATA*> s_read_list, s_write_list;
 
 struct T_EDGE_EVENT{
@@ -59,8 +61,8 @@ public:
 
 static vector<T_EDGE_EVENT> event_list;
 
-static FILE* log_file_p = NULL;
 
+//---FUNKTIONEN AUS SIAPP SDK BEISPIELEN---//---FUNCTIONS OUT OF SIAPP SDK EXAMPLES---//
 
 static void convert_str_to_value(E_EDGE_DATA_TYPE type, const char* in, T_EDGE_DATA* out)
 {
@@ -153,47 +155,28 @@ static std::string convert_value_to_str(T_EDGE_DATA_VALUE value, E_EDGE_DATA_TYP
     return out_value;
 }
 
-std::string convert_quality_to_str(uint32_t quality)
-{
-   std::string out;
-   if (quality & EDGE_QUALITY_FLAG_NOT_TOPICAL) {
-        out += "NT|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_OVERFLOW) {
-        out += "OV|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_OPERATOR_BLOCKED) {
-        out += "OB|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_SUBSITUTED) {
-        out += "SB|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_TEST) {
-        out += "T|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_INVALID) {
-        out += "IV|";
-    }
-
-    // Entferne '|' am Ende
-    if (!out.empty() && out.back() == '|') {
-        out.pop_back();
-    }
-
-    return out;
-}
-
 static void edgedata_callback(T_EDGE_DATA* event)
 {
-   pthread_mutex_lock(&s_mutex_event);
+    pthread_mutex_lock(&s_mutex_event);
 
-   if (event_list.size() >= EVENTS_LENGTH)
-   {
-      event_list.erase(event_list.begin());
-   }
-   T_EDGE_EVENT event_entry = {event->topic, event->handle, event->type, event->quality, event->value, event->timestamp64};
-   event_list.push_back(event_entry);
-   pthread_mutex_unlock(&s_mutex_event);
+    // Überprüfen, ob bereits ein Eintrag mit demselben Topic existiert
+    auto it = std::find_if(event_list.begin(), event_list.end(),
+        [&](const T_EDGE_EVENT& e) { return e.topic == event->topic; });
+
+    if (it != event_list.end()) {
+        // Eintrag existiert bereits, du kannst ihn hier ggf. aktualisieren, wenn nötig
+        it->handle = event->handle;
+        it->type = event->type;
+        it->quality = event->quality;
+        it->value = event->value;
+        it->timestamp64 = event->timestamp64;
+    }
+    else {
+        // Kein Eintrag mit dem gleichen Topic, also einen neuen Eintrag hinzufügen
+        T_EDGE_EVENT event_entry = { event->topic, event->handle, event->type, event->quality, event->value, event->timestamp64 };
+        event_list.push_back(event_entry);
+    }
+    pthread_mutex_unlock(&s_mutex_event);
 }
 
 //Synchronisieren mit der EdgeDataAPI
@@ -225,7 +208,6 @@ void* edgedata_task(void* void_ptr)
       {
          s_write_list.push_back(edge_data_get_data(discover_info->write_handle_list[i]));
       }
-      s_connected = true;
 
       while (1)
       {
@@ -238,20 +220,20 @@ void* edgedata_task(void* void_ptr)
          usleep(1000000);
          pthread_mutex_lock(&s_mutex);
       }
-      s_connected = false;
+      //Bei Fehler neuen Verbindungsversuch starten
       edge_data_disconnect();
-      /* error -> reconnect */
       pthread_mutex_unlock(&s_mutex);
    }
    return 0;
 }
 
+//---EIGENE FUNKTIONEN ZUM VERWENDEN DER EDGEDATA API---//---CUSTOM FUNCTIONS TO USE EDGE DATA API---//
+
 // Funktion zum Extrahieren und Umwandeln der Werte und Typen für Topics
-//std::map<std::string, std::pair<float, uint32_t>> processSICAM8toS7Topics(const std::vector<std::string>& specificTopics)
-std::map<std::string, std::tuple<float, uint32_t, int>> processSICAM8toS7Topics(const std::map<std::string, int>& specificTopics)
+std::map<std::string, std::tuple<float, uint32_t, std::string>> processSICAM8toS7Topics(const std::map<std::string, std::string>& specificTopics)
 {
     // Map zum Speichern des jeweiligen value (float), der Qualität und der nodeID
-    std::map<std::string, std::tuple<float, uint32_t, int>> SICAM8toS7Information;
+    std::map<std::string, std::tuple<float, uint32_t, std::string>> SICAM8toS7Information;
 
     // Eventliste nach Topics durchsuchen und relevante Informationen extrahieren
     for (const auto& event : event_list)
@@ -267,7 +249,7 @@ std::map<std::string, std::tuple<float, uint32_t, int>> processSICAM8toS7Topics(
             float numericValue = std::stof(out_value);
 
             // NodeID aus der Map lesen
-            int nodeId = it->second;
+            std::string nodeId = it->second;
 
             // Speichern des numericValue, der Qualität und der nodeID in der Map
             SICAM8toS7Information[event.topic] = std::make_tuple(numericValue, event.quality, nodeId);
@@ -276,7 +258,7 @@ std::map<std::string, std::tuple<float, uint32_t, int>> processSICAM8toS7Topics(
     return SICAM8toS7Information;
 }
 
-//Funktion zum Aktualisieren der Daten von S7 an SICAM8 auf dem Edge Data API
+//Funktion zum Aktualisieren der Daten von S7 an SICAM8 via Edge Data API
 bool processS7toSICAM8Data(vector<T_EDGE_DATA*> parsed_values)
 {
    vector<T_EDGE_DATA*> parsed_data = parsed_values;
@@ -300,68 +282,36 @@ bool processS7toSICAM8Data(vector<T_EDGE_DATA*> parsed_values)
    return true;
 }
 
-// Funktion zum Schreiben eines Bool-Wertes in Datenbaustein der SPS
-void writeBoolToSPS()
-{
-    
-}
+//---EIGENE FUNKTIONEN ZUR IMPLEMENTIERUNG DES OPC UA CLIENTS---//---CUSTOM FUNCTIONS TO IMPLEMENT OPC UA CLIENT---//
 
-// Funktion zum Schreiben eines DInt-Wertes in Datenbaustein der SPS
-void writeDIntToSPS()
-{
-    
-}
-
-// Funktion zum Schreiben eines Real-Wertes in Datenbaustein der SPS
-void writeRealToSPS()
-{
-   
-}
-// Funktion zum Lesen eines Bool-Wertes aus Datenbaustein der SPS
-void readBoolFromSPS()
-{
-  
-}
-
-// Funktion zum Lesen eines DInt-Wertes aus der SPS
-void readDIntFromSPS()
-{
-    
-}
-
-// Funktion zum Lesen eines Real-Wertes aus der SPS
-void readRealFromSPS()
-{
-    
-}
-//Liste für eingelesen Daten generieren
+//Liste für eingelesene Daten generieren
 std::vector<std::pair<std::string, float>> dataList;
 std::mutex dataMutex;
 
-//Funktion zum Aktualisieren der Daten Liste wenn Änderung vorliegt
-void dataChangeNotificationCallback(UA_Client* client, UA_UInt32 subId, void* subContext,
-    UA_UInt32 monId, void* monContext, UA_DataValue* value) {
-    if (value->hasValue) 
+//Funktion zum Aktualisieren der Liste eingelesener Daten wenn Änderung vorliegt
+void dataChangeNotificationCallback(UA_Client* client, UA_UInt32 subId, void* subContext, UA_UInt32 monId, void* monContext, UA_DataValue* value)
+{
+    if (value->hasValue)
     {
         float receivedValue = 0.0;
         // Überprüfe den Datentyp des Wertes
         const UA_DataType* type = value->value.type;
-        if (type == &UA_TYPES[UA_TYPES_BOOLEAN]) 
+        if (type == &UA_TYPES[UA_TYPES_BOOLEAN])
         {
             receivedValue = static_cast<float>(*(UA_Boolean*)value->value.data);
             std::cout << "Subscription ID: " << subId << ", Monitored Item ID: " << monId << ", Neuer Wert (Bool): " << (receivedValue ? "true" : "false") << std::endl;
         }
-        else if (type == &UA_TYPES[UA_TYPES_INT32]) 
+        else if (type == &UA_TYPES[UA_TYPES_INT32])
         {
             receivedValue = static_cast<float>(*(UA_Int32*)value->value.data);
             std::cout << "Subscription ID: " << subId << ", Monitored Item ID: " << monId << ", Neuer Wert (DInt): " << receivedValue << std::endl;
         }
-        else if (type == &UA_TYPES[UA_TYPES_FLOAT]) 
+        else if (type == &UA_TYPES[UA_TYPES_FLOAT])
         {
             receivedValue = *(UA_Float*)value->value.data;
             std::cout << "Subscription ID: " << subId << ", Monitored Item ID: " << monId << ", Neuer Wert (Float): " << receivedValue << std::endl;
         }
-        else 
+        else
         {
             std::cerr << "Unbekannter Datentyp für Monitored Item ID: " << monId << std::endl;
         }
@@ -370,8 +320,144 @@ void dataChangeNotificationCallback(UA_Client* client, UA_UInt32 subId, void* su
 
         // Daten in die globale Liste aktualisieren
         std::lock_guard<std::mutex> lock(dataMutex);
-        dataList.emplace_back(topic, receivedValue);
+        auto it = std::find_if(dataList.begin(), dataList.end(), [&topic](const std::pair<std::string, float>& entry) {
+            return entry.first == topic;
+            });
+        if (it == dataList.end()) 
+        {
+            dataList.emplace_back(topic, receivedValue);
+        }
+        else 
+        {
+            it->second = receivedValue;
+        }
     }
+}
+
+// Funktion zum Verifizieren ob Client-Zertifikat und Key zusammenpassen
+bool verifyCertificateAndKey(const char* certPath, const char* keyPath) {
+    FILE* certFile = fopen(certPath, "rb");
+    FILE* keyFile = fopen(keyPath, "rb");
+    if (!certFile || !keyFile) 
+    {
+        std::cout << "Fehler beim Öffnen der Zertifikat- oder Schlüsseldatei!" << std::endl;
+        return false;
+    }
+
+    X509* cert = d2i_X509_fp(certFile, NULL);
+    EVP_PKEY* pkey = d2i_PrivateKey_fp(keyFile, NULL);
+    fclose(certFile);
+    fclose(keyFile);
+
+    if (!cert || !pkey) {
+        std::cout << "Fehler beim Lesen der Zertifikat- oder Schlüsseldatei!" << std::endl;
+        if (cert) X509_free(cert);
+        if (pkey) EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    bool result = X509_check_private_key(cert, pkey);
+    if (!result) 
+    {
+        std::cout << "Zertifikat und privater Schlüssel stimmen nicht überein!" << std::endl;
+    }
+    else 
+    {
+        std::cout << "Zertifikat und privater Schlüssel stimmen überein." << std::endl;
+    }
+
+    X509_free(cert);
+    EVP_PKEY_free(pkey);
+
+    return result;
+}
+
+// Funktion zum Verifizieren ob Client-Zertifikat und CA zusammenpassen
+bool verifyCACertificate(const char* caCertPath, const char* clientCertPath) 
+{
+    FILE* caFile = fopen(caCertPath, "rb");
+    FILE* clientFile = fopen(clientCertPath, "rb");
+    if (!caFile || !clientFile) 
+    {
+        std::cout << "Fehler beim Öffnen der CA- oder Client-Zertifikatdatei!" << std::endl;
+        return false;
+    }
+
+    X509* caCert = d2i_X509_fp(caFile, NULL);
+    X509* clientCert = d2i_X509_fp(clientFile, NULL);
+    fclose(caFile);
+    fclose(clientFile);
+
+    if (!caCert || !clientCert) 
+    {
+        std::cout << "Fehler beim Lesen der CA- oder Client-Zertifikatdatei!" << std::endl;
+        if (caCert) X509_free(caCert);
+        if (clientCert) X509_free(clientCert);
+        ERR_print_errors_fp(stderr); // Print OpenSSL errors
+        return false;
+    }
+
+    // Neues X509_STORE erstellen und CA hinzufügen
+    X509_STORE* store = X509_STORE_new();
+    X509_STORE_add_cert(store, caCert);
+
+    // Neues X509_STORE_CTX erstellen und initialisieren mit Client-Zertifikat und CA
+    X509_STORE_CTX* ctx = X509_STORE_CTX_new();
+    X509_STORE_CTX_init(ctx, store, clientCert, NULL);
+
+    // Überprüfung des Client-Zertifikats
+    bool result = (X509_verify_cert(ctx) == 1);
+    if (!result) 
+    {
+        std::cout << "Client-Zertifikat wurde nicht von der CA signiert!" << std::endl;
+    }
+    else 
+    {
+        std::cout << "Client-Zertifikat wurde von der CA signiert." << std::endl;
+    }
+    // Speicher freigeben
+    X509_STORE_CTX_free(ctx);
+    X509_STORE_free(store);
+    X509_free(caCert);
+    X509_free(clientCert);
+
+    return result;
+}
+
+// Hilfsfunktion zur Überprüfung, ob eine Datei existiert
+bool fileExists(const char* filename) {
+    std::ifstream file(filename);
+    return file.good();
+}
+
+//Funktion zum Laden der Zertifikate (Entnommen aus Open62541 Beispielen)
+static UA_INLINE UA_ByteString loadFile(const char* const path) 
+{
+    UA_ByteString fileContents = UA_STRING_NULL;
+
+    //Datei öffnen
+    FILE* fp = fopen(path, "rb");
+    if (!fp) {
+        errno = 0;
+        return fileContents;
+    }
+
+    //Dateilänge bestimmen und Datei einlesen
+    fseek(fp, 0, SEEK_END);
+    fileContents.length = (size_t)ftell(fp);
+    fileContents.data = (UA_Byte*)UA_malloc(fileContents.length * sizeof(UA_Byte));
+    if (fileContents.data) {
+        fseek(fp, 0, SEEK_SET);
+        size_t read = fread(fileContents.data, sizeof(UA_Byte), fileContents.length, fp);
+        if (read != fileContents.length)
+            UA_ByteString_clear(&fileContents);
+    }
+    else {
+        fileContents.length = 0;
+    }
+    fclose(fp);
+
+    return fileContents;
 }
 //Ablauf in Main-Methode
 int main(int argc, char** argv)
@@ -383,10 +469,73 @@ int main(int argc, char** argv)
    pthread_t edgedata_thread_nr;
    int ret;
 
-   //Deklaration eines Open62541 Clients mit Statusvariablen
+   // Deklaration eines Open62541 Clients inklusive Default-Config
    UA_Client* client = UA_Client_new();
    UA_ClientConfig* config = UA_Client_getConfig(client);
-   UA_ClientConfig_setDefault(UA_Client_getConfig(client));
+   UA_ClientConfig_setDefault(config);
+
+   //OPC UA Securityeinstellungen setzen falls verwendet
+   if (Info::Security == 3) 
+   {
+       //Setzen der ApplicationURI
+       config->clientDescription.applicationUri = UA_String_fromChars(Info::ApplicationURI.c_str());
+       // Umwandeln der Dateipfade in UA_ByteStrings
+       std::string certPath = "/cert/" + Info::NameClientCert;
+       std::string keyPath = "/cert/" + Info::NameClientKey;
+       std::string caPath = "/cert/" + Info::NameCertAuth;
+       UA_ByteString certificate = loadFile(certPath.c_str());
+       UA_ByteString privateKey = loadFile(keyPath.c_str());
+       UA_ByteString trustListArray[] = { loadFile(caPath.c_str()) };
+       size_t trustListSize = sizeof(trustListArray) / sizeof(trustListArray[0]);
+       UA_ByteString* revocationList = NULL;
+
+       // Überprüfen der Existenz der Zertifikatdateien
+       if (!fileExists(certPath.c_str())) 
+       {
+           std::cout << "Client Zertifikat nicht gefunden!" << std::endl;
+       }
+       if (!fileExists(keyPath.c_str()))
+       {
+           std::cout << "Privaten Schlüssel des Clients nicht gefunden!" << std::endl;
+       }
+       if (!fileExists(caPath.c_str()))
+       {
+           std::cout << "Zertifikatsauthorität nicht gefunden!" << std::endl;
+       }
+       else 
+       {
+           // Verifiziere ob Client-Zertifikat und Key zusammenpassen
+           if (!verifyCertificateAndKey(certPath.c_str(), keyPath.c_str()))
+           {
+               std::cout << "Zertifikat und privater Schlüssel stimmen nicht überein! Es wird versuhcht ohne Verschlüsselung eine Verbindung aufzubauen." << std::endl;
+           }
+           // Verifiziere ob Client-Zertifikat und CA zusammenpassen
+           else if (!verifyCACertificate(caPath.c_str(), certPath.c_str())) {
+               std::cout << "CA-Zertifikat ist ungültig! Es wird versuhcht ohne Verschlüsselung eine Verbindung aufzubauen." << std::endl;
+           }
+           //Falls ja, Encryption mit Zertifikaten setzen
+           else 
+           {
+               config->securityMode = UA_MESSAGESECURITYMODE_SIGNANDENCRYPT;
+               config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256");
+
+               // Setzen der Verschlüsselung
+               UA_StatusCode retval = UA_ClientConfig_setDefaultEncryption(
+                   config,
+                   certificate,
+                   privateKey,
+                   trustListArray,
+                   trustListSize,
+                   revocationList,
+                   0
+               );
+
+               if (retval != UA_STATUSCODE_GOOD) {
+                   std::cout << "Fehler beim Setzen der Verschlüsselung: " << retval << std::endl;
+               }
+           }
+       }
+   }
 
    //Thread erstellen der edgedata_task aufruft
    if (pthread_create(&edgedata_thread_nr, NULL, edgedata_task, &ret))
@@ -412,13 +561,13 @@ int main(int argc, char** argv)
                   << ", ByteOffset: " << signal.byteOffset
                   << ", BitOffset: " << signal.bitOffset
                   << std::endl;
-    }
+   }
 
    //Ausgabe aller Signale von S7 an SICAM8
     printf("\nSignale von S7 an SICAM8\n");
 
     for (const auto& signal : readSignals)
-   {
+    {
         std::cout << "Name: " << signal.name
                   << ", Datentyp: " << signal.dataType
                   << ", ByteOffset: " << signal.byteOffset
@@ -429,8 +578,14 @@ int main(int argc, char** argv)
     // Variable für den Verbindungsstatus
     bool verbunden = false;
 
-    //Map für Topics und nodeIds
-    std::map<std::string, int> SICAM8toS7Topics;
+    //Map für Topics und nodeIds von Signalen von SICAM8 an S7
+    std::map<std::string, std::string> SICAM8toS7Topics;
+
+    for (const auto& signal : writeSignals)
+    {
+        std::string symbolicNodeID = "\"" + Info::DBS8anS7 + "\".\"" + signal.name + "\"";
+        SICAM8toS7Topics[signal.name] = symbolicNodeID;
+    }
 
     //Kurze Wartezeit vor dem ersten Verbindungsaufbau (1s)
     usleep(1000000);
@@ -442,8 +597,24 @@ int main(int argc, char** argv)
         while (!verbunden)
         {
             // Versuche Verbindung zum OPC UA Server herzustellen
-            std::string opcUrl = "opc.tcp://" + Info::IPadresse + ":4840";
-            UA_StatusCode status = UA_Client_connect(client, opcUrl.c_str());
+            UA_StatusCode status;
+            //Falls keine Security ausgewählt:
+            if (Info::Security == 1) 
+            {
+                //Verbindung ohne Username und Passwort herstellen
+                std::string opcUrl = "opc.tcp://" + Info::IPadresse + ":4840";
+                status = UA_Client_connect(client, opcUrl.c_str());
+            }
+            //Sonst:
+            else 
+            {
+                // Verbindung mit Benutzername und Passwort herstellen
+                std::string opcUrl = "opc.tcp://" + Info::IPadresse + ":4840";
+                std::string username = Info::Username;
+                std::string password = Info::Passwort;
+
+                status = UA_Client_connectUsername(client, opcUrl.c_str(), username.c_str(), password.c_str());
+            }
 
             if (status == UA_STATUSCODE_GOOD)
             {
@@ -451,45 +622,6 @@ int main(int argc, char** argv)
                 std::cout << "Verbindung zum OPC UA Server hergestellt!" << std::endl;
                 verbunden = true;
 
-                // Iteriere durch die Liste, extrahiere die Topics der Signale von SICAM8 an S7 und generiere die Nodes am Server für Registered Write
-                for (const auto& signal : writeSignals)
-                {
-                    //Generiere die NodeID aus dem Signal- und Bausteinnamen
-                    UA_NodeId nodeId;
-                    nodeId.namespaceIndex = 3; // Setze den Namespace auf 3
-                    nodeId.identifierType = UA_NODEIDTYPE_STRING; // Setze den Typ auf STRING
-                    std::string fullSymbolicName = "\""+Info::DBS8anS7+"\".\"" + signal.name + "\"";
-                    nodeId.identifier.string = UA_STRING_ALLOC(fullSymbolicName.c_str());
-
-                    // Registriere die symbolischen NodeIDs
-                    UA_NodeId nodeIds[1] = { nodeId };
-                    UA_RegisterNodesRequest request;
-                    UA_RegisterNodesRequest_init(&request);
-                    request.nodesToRegister = nodeIds;
-                    request.nodesToRegisterSize = 1;
-
-                    //Registrierungsanfrage
-                    UA_RegisterNodesResponse response = UA_Client_Service_registerNodes(client, request);
-
-                    // Auswertung der Antwort
-                    if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
-                        for (size_t i = 0; i < response.registeredNodeIdsSize; i++) {
-                            UA_NodeId registeredNodeId = response.registeredNodeIds[i];
-                            printf("Registrierte NodeID: ns=%u;i=%u;Name=%s\n", registeredNodeId.namespaceIndex, registeredNodeId.identifier.numeric, fullSymbolicName.c_str());
-
-                            //Speicher die registrierte NodeIDs zusammen mit Signalnamen in Map
-                            int numericNodeId = static_cast<int>(registeredNodeId.identifier.numeric);
-                            SICAM8toS7Topics[signal.name] = numericNodeId;
-                        }
-                    }
-                    else 
-                    {
-                        printf("Node konnte nicht registriert werden!\n");
-                    }
-                    // Speicher freigeben
-                    UA_RegisterNodesResponse_clear(&response);
-                    UA_String_clear(&nodeId.identifier.string);
-                }
                 // Erstelle Subscriptions für alle Signale von S7 an SICAM8
                 UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
                 request.requestedPublishingInterval = 200.0; // 200ms
@@ -498,7 +630,8 @@ int main(int argc, char** argv)
                 request.maxNotificationsPerPublish = 0; // Unbegrenzt
                 UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(client, request, NULL, NULL, NULL);
 
-                if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
+                if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) 
+                {
                     UA_UInt32 subscriptionId = response.subscriptionId;
                     std::cout << "Subscription erfolgreich erstellt, ID: " << subscriptionId << std::endl;
 
@@ -527,7 +660,7 @@ int main(int argc, char** argv)
             }
             else
             {
-                // Bei Misserfolg nach 10 Sekunden erneut versuchen
+                // Bei Misserfolg nach 10 Sekunden erneut versuchen eine Verbindung aufzubauen
                 std::cerr << "Verbindung zum OPC UA Server fehlgeschlagen. Erneuter Versuch in 10 Sekunden..." << std::endl;
                 usleep(10000000);
             }
@@ -561,16 +694,17 @@ int main(int argc, char** argv)
                 UA_Variant_init(&valueAttribute);
 
                 //Aufrufen der Funktion zum Einlesen der Daten der extrahierten Topics
-                std::map<std::string, std::tuple<float, uint32_t, int>> SICAM8toS7Data = processSICAM8toS7Topics(SICAM8toS7Topics);
+                std::map<std::string, std::tuple<float, uint32_t, std::string>> SICAM8toS7Data = processSICAM8toS7Topics(SICAM8toS7Topics);
 
+                // Für jedes Element von SICAM8toS7Data die Werte an SPS übertragen
                 for (const auto& entry : SICAM8toS7Data)
                 {
                     const std::string& topic = entry.first;
                     float value = std::get<0>(entry.second);
                     uint32_t quality = std::get<1>(entry.second);
-                    int nodeId = std::get<2>(entry.second);
+                    std::string nodeIdStr = std::get<2>(entry.second);
 
-                    std::cout << "Topic: " << topic << ", Value: " << value << ", Quality: " << quality << ", NodeID: " << nodeId << std::endl;
+                    std::cout << "Topic: " << topic << ", Value: " << value << ", Quality: " << quality << ", NodeID: " << nodeIdStr << std::endl;
 
                     // Suche den entsprechenden Signal-Eintrag zum Topic
                     auto it = std::find_if(writeSignals.begin(), writeSignals.end(),
@@ -579,9 +713,6 @@ int main(int argc, char** argv)
                     if (it != writeSignals.end())
                     {
                         const Signal& signal = *it;
-
-                        // Umwandeln der übergebenen DB Nr zu einem Int
-                        int nodeId = std::get<2>(entry.second);  // NodeID aus der map holen
 
                         // Schreibe Daten in den Node basierend auf dem Datentyp
                         if (signal.dataType == "Bool") {
@@ -598,10 +729,15 @@ int main(int argc, char** argv)
                         }
 
                         // NodeID erstellen
-                        UA_NodeId nodeIdObj = UA_NODEID_NUMERIC(3, nodeId); // NamespaceIndex = 3, nodeId ist die numerische ID
+                        char* tempNodeIdStr = strdup(nodeIdStr.c_str());
+                        UA_NodeId nodeIdObj = UA_NODEID_STRING(3, tempNodeIdStr); // NamespaceIndex = 3, tempnodeIdStr ist die symbolische NodeID
+                        //UA_NodeId nodeIdObj = UA_NODEID_STRING(3, nodeIdStr.c_str());
 
                         // Schreibe den Wert in die SPS über OPC UA
                         UA_StatusCode statusCode = UA_Client_writeValueAttribute(client, nodeIdObj, &valueAttribute);
+
+                        //Speicher freigeben
+                        free(tempNodeIdStr);
 
                         // Auswertung des Ergebnisses
                         if (statusCode == UA_STATUSCODE_GOOD)
@@ -625,14 +761,15 @@ int main(int argc, char** argv)
             std::vector<std::pair<std::string, float>> S7toSICAM8Topics;
             {
                 std::lock_guard<std::mutex> lock(dataMutex);
-                S7toSICAM8Topics.swap(dataList); // Schnelles Austauschen der Listen
+                S7toSICAM8Topics.swap(dataList); //Liste eingelesener Daten in S7toSICAM8Topics schreiben
             }
 
             if (!S7toSICAM8Topics.empty()) 
             {
                 std::vector<T_EDGE_DATA*> S7toSICAM8Data;
 
-                for (const auto& entry : S7toSICAM8Topics) {
+                for (const auto& entry : S7toSICAM8Topics) 
+                {
                     const std::string& topic = entry.first;
                     float value = entry.second;
 
@@ -640,10 +777,11 @@ int main(int argc, char** argv)
                     auto currentTime = std::chrono::system_clock::now();
                     auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(currentTime.time_since_epoch()).count();
 
-                    // Erhalte den Handle für das Topic
+                    // Erhalte das Handle für das Topic
                     T_EDGE_DATA_HANDLE handle = edge_data_get_writeable_handle(topic.c_str());
 
-                    if (handle != 0) {
+                    if (handle != 0) 
+                    {
                         // Anlegen eines neuen Eintrags
                         T_EDGE_DATA new_entry;
                         E_EDGE_DATA_TYPE type = E_EDGE_DATA_TYPE_UNKNOWN;
@@ -652,13 +790,14 @@ int main(int argc, char** argv)
                         new_entry.timestamp64 = timestamp;
 
                         // E_EDGE_DATA_TYPE aus s_write_list auslesen
-                        for (unsigned int y = 0; y < s_write_list.size(); y++) {
-                            if (s_write_list[y]->handle == new_entry.handle) {
+                        for (unsigned int y = 0; y < s_write_list.size(); y++) 
+                        {
+                            if (s_write_list[y]->handle == new_entry.handle) 
+                            {
                                 type = s_write_list[y]->type;
                                 break;
                             }
                         }
-
                         // Konvertieren der Daten und Ablegen in new_entry
                         new_entry.type = type;
                         std::string valueStr = std::to_string(value);
@@ -667,11 +806,11 @@ int main(int argc, char** argv)
 
                         S7toSICAM8Data.push_back(new T_EDGE_DATA(new_entry));
                     }
-                    else {
+                    else 
+                    {
                         std::cerr << "Kein Handle für Topic: " << topic << std::endl;
                     }
                 }
-
                 // Aufruf der Funktion zum Aktualisieren der Daten
                 processS7toSICAM8Data(S7toSICAM8Data);
 

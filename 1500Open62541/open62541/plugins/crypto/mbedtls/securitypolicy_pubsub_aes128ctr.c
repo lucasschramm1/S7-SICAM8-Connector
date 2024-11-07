@@ -14,7 +14,6 @@
 #include <mbedtls/aes.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
-#include <mbedtls/entropy_poll.h>
 #include <mbedtls/error.h>
 #include <mbedtls/md.h>
 #include <mbedtls/sha1.h>
@@ -139,13 +138,15 @@ encrypt_sp_pubsub_aes128ctr(const PUBSUB_AES128CTR_ChannelContext *cc,
     if(mbedErr)
         return UA_STATUSCODE_BADINTERNALERROR;
 
-    /* Prepare the counterBlock required for encryption/decryption */
+    /* Prepare the counterBlock required for encryption/decryption 
+     * Block counter starts at 1 according to part 14 (7.2.2.4.3.2)*/
     UA_Byte counterBlockCopy[UA_AES128CTR_ENCRYPTION_BLOCK_SIZE];
+    UA_Byte counterInitialValue[4] = {0,0,0,1};
     memcpy(counterBlockCopy, cc->keyNonce, UA_AES128CTR_KEYNONCE_LENGTH);
     memcpy(counterBlockCopy + UA_AES128CTR_KEYNONCE_LENGTH,
            cc->messageNonce, UA_AES128CTR_MESSAGENONCE_LENGTH);
-    memset(counterBlockCopy + UA_AES128CTR_KEYNONCE_LENGTH +
-           UA_AES128CTR_MESSAGENONCE_LENGTH, 0, 4);
+    memcpy(counterBlockCopy + UA_AES128CTR_KEYNONCE_LENGTH +
+           UA_AES128CTR_MESSAGENONCE_LENGTH, &counterInitialValue, 4);
 
     size_t counterblockoffset = 0;
     UA_Byte aesBuffer[UA_AES128CTR_ENCRYPTION_BLOCK_SIZE];
@@ -204,7 +205,7 @@ channelContext_newContext_sp_pubsub_aes128ctr(void *policyContext,
        (encryptingKey && encryptingKey->length != UA_AES128CTR_KEY_LENGTH) ||
        (keyNonce && keyNonce->length != UA_AES128CTR_KEYNONCE_LENGTH))
         return UA_STATUSCODE_BADSECURITYCHECKSFAILED;
-       
+
     /* Allocate the channel context */
     PUBSUB_AES128CTR_ChannelContext *cc = (PUBSUB_AES128CTR_ChannelContext *)
         UA_calloc(1, sizeof(PUBSUB_AES128CTR_ChannelContext));
@@ -299,9 +300,8 @@ policyContext_newContext_sp_pubsub_aes128ctr(UA_PubSubSecurityPolicy *securityPo
         goto error;
     }
 
-    /* Add the system entropy source */
-    mbedErr = mbedtls_entropy_add_source(&pc->entropyContext, mbedtls_platform_entropy_poll,
-                                         NULL, 0, MBEDTLS_ENTROPY_SOURCE_STRONG);
+    mbedErr = mbedtls_entropy_self_test(0);
+
     if(mbedErr) {
         retval = UA_STATUSCODE_BADSECURITYCHECKSFAILED;
         goto error;

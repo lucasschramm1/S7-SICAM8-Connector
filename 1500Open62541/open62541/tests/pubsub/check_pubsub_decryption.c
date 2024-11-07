@@ -5,7 +5,6 @@
  * Copyright (c) 2017 - 2018 Fraunhofer IOSB (Author: Jan Hermes)
  */
 
-#include <open62541/plugin/pubsub_udp.h>
 #include <open62541/plugin/securitypolicy_default.h>
 #include <open62541/server_config_default.h>
 #include <open62541/server_pubsub.h>
@@ -15,11 +14,11 @@
 
 #include <check.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 #include <mbedtls/aes.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
-#include <mbedtls/entropy_poll.h>
 #include <mbedtls/error.h>
 #include <mbedtls/md.h>
 #include <mbedtls/sha1.h>
@@ -48,22 +47,19 @@ UA_Byte keyNonce[UA_AES128CTR_KEYNONCE_LENGTH] = {0};
 UA_Server *server = NULL;
 UA_NodeId writerGroupId, readerGroupId, connectionId;
 
-UA_Logger *logger = NULL;
-
 static void
 setup(void) {
     server = UA_Server_new();
     UA_ServerConfig *config = UA_Server_getConfig(server);
-    UA_ServerConfig_setDefault(config);
-    UA_ServerConfig_addPubSubTransportLayer(config, UA_PubSubTransportLayerUDPMP());
+    UA_StatusCode retVal = UA_ServerConfig_setDefault(config);
 
     config->pubSubConfig.securityPolicies =
         (UA_PubSubSecurityPolicy *)UA_malloc(sizeof(UA_PubSubSecurityPolicy));
     config->pubSubConfig.securityPoliciesSize = 1;
     UA_PubSubSecurityPolicy_Aes128Ctr(config->pubSubConfig.securityPolicies,
-                                      &config->logger);
+                                      config->logging);
 
-    UA_Server_run_startup(server);
+    retVal |= UA_Server_run_startup(server);
     // add connection
     UA_PubSubConnectionConfig connectionConfig;
     memset(&connectionConfig, 0, sizeof(UA_PubSubConnectionConfig));
@@ -74,10 +70,10 @@ setup(void) {
                          &UA_TYPES[UA_TYPES_NETWORKADDRESSURLDATATYPE]);
     connectionConfig.transportProfileUri =
         UA_STRING("http://opcfoundation.org/UA-Profile/Transport/pubsub-udp-uadp");
-    connectionConfig.publisherId.numeric = 2234;
-    UA_Server_addPubSubConnection(server, &connectionConfig, &connectionId);
-
-    logger = &server->config.logger;
+    connectionConfig.publisherIdType = UA_PUBLISHERIDTYPE_UINT16;
+    connectionConfig.publisherId.uint16 = 2234;
+    retVal |= UA_Server_addPubSubConnection(server, &connectionConfig, &connectionId);
+    ck_assert_int_eq(retVal, UA_STATUSCODE_GOOD);
 }
 
 static void
@@ -136,12 +132,12 @@ hexstr_to_char(const char *hexstr) {
 #define MSG_LENGTH_DECRYPTED 39
 #define MSG_HEADER "f111ba08016400014df4030100000008b02d012e01000000"
 #define MSG_HEADER_NO_SEC "f101ba08016400014df4"
-#define MSG_PAYLOAD_ENC "da434ce02ee19922c6e916c8154123baa25f67288e3378d613f3203909"
+#define MSG_PAYLOAD_ENC "1c26767c41d1b02e506daece57546ce9c958279e1b6be3e28c0f775648"
 #define MSG_PAYLOAD_DEC "e1101054c2949f3a" \
                         "d701b4205f69841e" \
                         "5f6901000d7657c2" \
                         "949F3ad701"
-#define MSG_SIG "6e08a9ff14b83ea2247792eeffc757c85ac99c0ffa79e4fbe5629783dc77b403"
+#define MSG_SIG "31eb5d01b947a70cee7f82d4c77924811b06e7e1c93d1e7f03dd2125fc48fc5a"
 #define MSG_SIG_INVALID "5e08a9ff14b83ea2247792eeffc757c85ac99c0ffa79e4fbe5629783dc77b403"
 
 // static void

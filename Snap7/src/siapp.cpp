@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: MIT
  * Copyright 2024 Siemens AG
  *
- * Authors:
- *    Lukas Wimmer <lukas.wimmer@siemens.com>
- *    Lucas Schramm <lucas.schramm@siemens.com>
+ * Authors of this file:
+ *    Lukas Wimmer <lukas.wimmer@siemens.com> (SIAPP SDK Basic Functions)
+ *    Lucas Schramm <lucas.schramm@siemens.com> (Specific Functions for implementation of Snap7)
  */
 
 #include <stdlib.h>
@@ -29,8 +29,6 @@
 #include "ReadSignals.h"
 #include "WriteSignals.h"
 #include "Info.h"
-
-#define EVENTS_LENGTH 50
 
 using namespace std;
 
@@ -55,7 +53,7 @@ public:
 
 static vector<T_EDGE_EVENT> event_list;
 
-static FILE* log_file_p = NULL;
+//---FUNKTIONEN AUS SIAPP SDK BEISPIELEN---//---FUNCTIONS OUT OF SIAPP SDK EXAMPLES---//
 
 static void convert_str_to_value(E_EDGE_DATA_TYPE type, const char* in, T_EDGE_DATA* out)
 {
@@ -148,47 +146,28 @@ static std::string convert_value_to_str(T_EDGE_DATA_VALUE value, E_EDGE_DATA_TYP
     return out_value;
 }
 
-std::string convert_quality_to_str(uint32_t quality)
-{
-   std::string out;
-   if (quality & EDGE_QUALITY_FLAG_NOT_TOPICAL) {
-        out += "NT|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_OVERFLOW) {
-        out += "OV|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_OPERATOR_BLOCKED) {
-        out += "OB|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_SUBSITUTED) {
-        out += "SB|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_TEST) {
-        out += "T|";
-    }
-    if (quality & EDGE_QUALITY_FLAG_INVALID) {
-        out += "IV|";
-    }
-
-    // Entferne '|' am Ende
-    if (!out.empty() && out.back() == '|') {
-        out.pop_back();
-    }
-
-    return out;
-}
-
 static void edgedata_callback(T_EDGE_DATA* event)
 {
-   pthread_mutex_lock(&s_mutex_event);
+    pthread_mutex_lock(&s_mutex_event);
 
-   if (event_list.size() >= EVENTS_LENGTH)
-   {
-      event_list.erase(event_list.begin());
-   }
-   T_EDGE_EVENT event_entry = {event->topic, event->handle, event->type, event->quality, event->value, event->timestamp64};
-   event_list.push_back(event_entry);
-   pthread_mutex_unlock(&s_mutex_event);
+    // Überprüfen, ob bereits ein Eintrag mit demselben Topic existiert
+    auto it = std::find_if(event_list.begin(), event_list.end(),
+        [&](const T_EDGE_EVENT& e) { return e.topic == event->topic; });
+
+    if (it != event_list.end()) {
+        // Eintrag existiert bereits, du kannst ihn hier ggf. aktualisieren, wenn nötig
+        it->handle = event->handle;
+        it->type = event->type;
+        it->quality = event->quality;
+        it->value = event->value;
+        it->timestamp64 = event->timestamp64;
+    }
+    else {
+        // Kein Eintrag mit dem gleichen Topic, also einen neuen Eintrag hinzufügen
+        T_EDGE_EVENT event_entry = { event->topic, event->handle, event->type, event->quality, event->value, event->timestamp64 };
+        event_list.push_back(event_entry);
+    }
+    pthread_mutex_unlock(&s_mutex_event);
 }
 
 //Synchronisieren mit der EdgeDataAPI
@@ -241,6 +220,8 @@ void* edgedata_task(void* void_ptr)
    return 0;
 }
 
+//---EIGENE FUNKTIONEN ZUM VERWENDEN DER EDGEDATA API---//---CUSTOM FUNCTIONS TO USE EDGE DATA API---//
+
 // Funktion zum Extrahieren und Umwandeln der Werte und Typen für Topics
 std::map<std::string, std::pair<float, uint32_t>> processSICAM8toS7Topics(const std::vector<std::string>& specificTopics)
 {
@@ -271,7 +252,7 @@ bool processS7toSICAM8Data(vector<T_EDGE_DATA*> parsed_values)
    vector<T_EDGE_DATA*> parsed_data = parsed_values;
    for (uint32_t i = 0; i < parsed_data.size(); i++)
    {
-      /* enter critical section */
+      //Anfang kritischer Abschnitt
       pthread_mutex_lock(&s_mutex);
       for (int w = 0; w < s_write_list.size(); w++)
       {
@@ -283,11 +264,13 @@ bool processS7toSICAM8Data(vector<T_EDGE_DATA*> parsed_values)
             edge_data_sync_write(&s_write_list[w]->handle, 1);
          }
       }
-      /* leave critical section */
+      //Verlasse kritischen Abschnitt
       pthread_mutex_unlock(&s_mutex);
    }
    return true;
 }
+
+//---EIGENE FUNKTIONEN ZUR IMPLEMENTIERUNG VON SNAP7---//---CUSTOM FUNCTIONS TO IMPLEMENT SNAP7---//
 
 // Funktion zum Schreiben eines Bool-Wertes in Datenbaustein der SPS
 void writeBoolToSPS(TS7Client& Client, int dbNumber, const Signal& signal, bool value, const std::string& topic)
@@ -295,26 +278,31 @@ void writeBoolToSPS(TS7Client& Client, int dbNumber, const Signal& signal, bool 
     uint8_t buffer[1] = { 0 };
 
     // Lesen des Bytes aus der SPS
-    if (Client.DBRead(dbNumber, signal.byteOffset, 1, buffer) != 0) {
+    if (Client.DBRead(dbNumber, signal.byteOffset, 1, buffer) != 0) 
+    {
         std::cerr << "Fehler beim Lesen des Bytes für " << topic << std::endl;
         return;
     }
-
     // Setzen des spezifischen Bits im Byte
     int bitPosition = signal.bitOffset;
-    if (bitPosition < 0 || bitPosition >= 8) {
+    if (bitPosition < 0 || bitPosition >= 8) 
+    {
         std::cerr << "Ungültige Bit-Position: " << bitPosition << std::endl;
         return;
     }
 
-    if (value) {
+    if (value) 
+    {
         buffer[0] |= (1 << bitPosition); // Setze das Bit auf 1
-    } else {
+    } 
+    else 
+    {
         buffer[0] &= ~(1 << bitPosition); // Setze das Bit auf 0
     }
 
     // Schreiben des aktualisierten Bytes zurück in die SPS
-    if (Client.DBWrite(dbNumber, signal.byteOffset, 1, buffer) != 0) {
+    if (Client.DBWrite(dbNumber, signal.byteOffset, 1, buffer) != 0) 
+    {
         std::cerr << "Fehler beim Schreiben des Bool-Werts für " << topic << std::endl;
     }
 }
@@ -331,8 +319,9 @@ void writeDIntToSPS(TS7Client& Client, int dbNumber, const Signal& signal, uint3
     buffer[2] = static_cast<uint8_t>((value >> 8) & 0xFF);
     buffer[3] = static_cast<uint8_t>(value & 0xFF);
 
-    // Schreibe den Buffer in die SPS
-    if (Client.DBWrite(dbNumber, signal.byteOffset, sizeof(buffer), buffer) != 0) {
+    // Schreibe den Puffer in die SPS
+    if (Client.DBWrite(dbNumber, signal.byteOffset, sizeof(buffer), buffer) != 0) 
+    {
         std::cerr << "Fehler beim Schreiben des DInt-Werts für " << topic << std::endl;
     }
 }
@@ -353,28 +342,30 @@ void writeRealToSPS(TS7Client& Client, int dbNumber, const Signal& signal, float
     buffer[3] = static_cast<uint8_t>(intValue & 0xFF);
 
     // Schreibe den Buffer in die SPS
-    if (Client.DBWrite(dbNumber, signal.byteOffset, sizeof(buffer), buffer) != 0) {
+    if (Client.DBWrite(dbNumber, signal.byteOffset, sizeof(buffer), buffer) != 0) 
+    {
         std::cerr << "Fehler beim Schreiben des Real-Werts für " << topic << std::endl;
     }
 }
+
 // Funktion zum Lesen eines Bool-Wertes aus Datenbaustein der SPS
 uint32_t readBoolFromSPS(TS7Client& Client, int dbNumber, const Signal& signal)
 {
     uint8_t buffer[1] = { 0 };
 
     // Lesen des Bytes aus der SPS
-    if (Client.DBRead(dbNumber, signal.byteOffset, 1, buffer) != 0) {
+    if (Client.DBRead(dbNumber, signal.byteOffset, 1, buffer) != 0) 
+    {
         std::cerr << "Fehler beim Lesen des Bytes für " << signal.name << std::endl;
-        return 0; // Fehlerfall: Rückgabewert 0, könnte auch eine spezielle Fehlerbehandlung sein
+        return 0;
     }
-
     // Extrahiere das Bit an der angegebenen Position
     int bitPosition = signal.bitOffset;
-    if (bitPosition < 0 || bitPosition >= 8) {
+    if (bitPosition < 0 || bitPosition >= 8) 
+    {
         std::cerr << "Ungültige Bit-Position: " << bitPosition << std::endl;
-        return 0; // Fehler: Ungültige Position
+        return 0;
     }
-
     // Bit extrahieren und als unsigned int zurückgeben
     return (buffer[0] >> bitPosition) & 0x01;
 }
@@ -383,7 +374,8 @@ uint32_t readBoolFromSPS(TS7Client& Client, int dbNumber, const Signal& signal)
 uint32_t readDIntFromSPS(TS7Client& Client, int dbNumber, const Signal& signal)
 {
     uint8_t buffer[4] = { 0 };
-    if (Client.DBRead(dbNumber, signal.byteOffset, sizeof(buffer), buffer) != 0) {
+    if (Client.DBRead(dbNumber, signal.byteOffset, sizeof(buffer), buffer) != 0)
+    {
         std::cerr << "Fehler beim Lesen des DInt-Werts für " << signal.name << std::endl;
         return 0;
     }
@@ -398,7 +390,8 @@ uint32_t readDIntFromSPS(TS7Client& Client, int dbNumber, const Signal& signal)
 float readRealFromSPS(TS7Client& Client, int dbNumber, const Signal& signal)
 {
     uint8_t buffer[4] = { 0 };
-    if (Client.DBRead(dbNumber, signal.byteOffset, sizeof(buffer), buffer) != 0) {
+    if (Client.DBRead(dbNumber, signal.byteOffset, sizeof(buffer), buffer) != 0) 
+    {
         std::cerr << "Fehler beim Lesen des Real-Werts für " << signal.name << std::endl;
         return 0.0f;
     }
@@ -464,6 +457,24 @@ int main(int argc, char** argv)
    // Variable für den Verbindungsstatus
    bool verbunden = false;
 
+   //Lege Liste mit Topics der Signale von SICAM8 an S7 an
+   std::vector<std::string> SICAM8toS7Topics;
+
+   // Iteriere durch die übergebene writeSignals-Liste und extrahiere die Topics der Signale von SICAM8 an S7
+   for (const auto& signal : writeSignals)
+   {
+       SICAM8toS7Topics.push_back(signal.name);
+   }
+
+   //Lege Liste mit Topics der Signale von S7 an SICAM8
+   std::vector<std::string> S7toSICAM8Topics;
+
+   // Iteriere durch die readSignals-Liste und extrahiere die Topics der Signale von S7 an SICAM8
+   for (const auto& signal : readSignals)
+   {
+       S7toSICAM8Topics.push_back(signal.name);
+   }
+
    //Kurze Wartezeit vor dem ersten Verbindungsaufbau (1s)
    usleep(1000000);
 
@@ -503,18 +514,10 @@ int main(int argc, char** argv)
             break;
          }
 
-         //Lege Liste mit Topics der Signale von SICAM8 an S7 an
-         std::vector<std::string> SICAM8toS7Topics;
-
-         // Iteriere durch die übergebene writeSignals-Liste und extrahiere die Topics der Signale von SICAM8 an S7
-         for (const auto& signal : writeSignals)
-         {
-            SICAM8toS7Topics.push_back(signal.name);
-         }
-
          //Aufrufen der Funktion zum Einlesen der Daten der extrahierten Topics
          std::map<std::string, std::pair<float, uint32_t>> SICAM8toS7Data = processSICAM8toS7Topics(SICAM8toS7Topics);
 
+         //Für jedes Element von SICAM8toS7Data die Werte an SPS übertragen
          for (const auto& entry : SICAM8toS7Data)
          {
             const std::string& topic = entry.first;
@@ -554,15 +557,6 @@ int main(int argc, char** argv)
          //Erstellen eines Vektors mit Datenpaketen, die ausgegeben werden sollen
          vector<T_EDGE_DATA*> S7toSICAM8Data;
 
-         //Lege Liste mit Topics der Signale von S7 an SICAM8
-         std::vector<std::string> S7toSICAM8Topics;
-
-         // Iteriere durch die readSignals-Liste und extrahiere die Topics der Signale von S7 an SICAM8
-         for (const auto& signal : readSignals)
-         {
-            S7toSICAM8Topics.push_back(signal.name);
-         }
-
          //for-Schleife zur Ausgabe der berechneten Werte
          for (const std::string& topic : S7toSICAM8Topics)
          {
@@ -573,9 +567,6 @@ int main(int argc, char** argv)
 
                //Umwandlung in einen String
                std::string handleStr = std::to_string(handle);
-
-               // Testweise Ausgabe des Handles
-               //std::cout << "Handle fuer: '" << topic << "': " << handleStr << std::endl;
 
                //Generieren eines aktuellen Zeitstempels fuer das Ausgabesignal
                auto currentTime = std::chrono::system_clock::now();
