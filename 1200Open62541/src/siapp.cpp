@@ -27,9 +27,16 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
-#include <openssl/x509.h>
-#include <openssl/pem.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/rsa.h>
+#include <openssl/asn1.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
+#include <openssl/pem.h>
+#include <openssl/bn.h>
+#include <openssl/conf.h>
+#include <openssl/rand.h>
 #include <open62541/client.h>
 #include <open62541/client_highlevel.h>
 #include <open62541/client_config_default.h>
@@ -61,9 +68,9 @@ public:
 
 static vector<T_EDGE_EVENT> event_list;
 
-
 //---FUNKTIONEN AUS SIAPP SDK BEISPIELEN---//---FUNCTIONS OUT OF SIAPP SDK EXAMPLES---//
 
+//Konvertiere String in einen EDGE_DATA_VALUE
 static void convert_str_to_value(E_EDGE_DATA_TYPE type, const char* in, T_EDGE_DATA* out)
 {
    switch (type)
@@ -93,6 +100,7 @@ static void convert_str_to_value(E_EDGE_DATA_TYPE type, const char* in, T_EDGE_D
    }
 }
 
+//Konvertiere EDGE_DATA_QUALITY in einen Integer
 static void convert_quality_str_to_value(const char* in, T_EDGE_DATA* out)
 {
    uint32_t quality = EDGE_QUALITY_VALID_VALUE;
@@ -123,6 +131,7 @@ static void convert_quality_str_to_value(const char* in, T_EDGE_DATA* out)
    out->quality = quality;
 }
 
+//Konvertiere EDGE_DATA_VALUE in einen String
 static std::string convert_value_to_str(T_EDGE_DATA_VALUE value, E_EDGE_DATA_TYPE type)
 {
     std::string out_value;
@@ -151,10 +160,10 @@ static std::string convert_value_to_str(T_EDGE_DATA_VALUE value, E_EDGE_DATA_TYP
             out_value = "0";
             break;
     }
-
     return out_value;
 }
 
+//EdgeDataCallback für abonnierte Topics
 static void edgedata_callback(T_EDGE_DATA* event)
 {
     pthread_mutex_lock(&s_mutex_event);
@@ -424,12 +433,6 @@ bool verifyCACertificate(const char* caCertPath, const char* clientCertPath)
     return result;
 }
 
-// Hilfsfunktion zur Überprüfung, ob eine Datei existiert
-bool fileExists(const char* filename) {
-    std::ifstream file(filename);
-    return file.good();
-}
-
 //Funktion zum Laden der Zertifikate (Entnommen aus Open62541 Beispielen)
 static UA_INLINE UA_ByteString loadFile(const char* const path) 
 {
@@ -459,13 +462,153 @@ static UA_INLINE UA_ByteString loadFile(const char* const path)
 
     return fileContents;
 }
+
+// Hilfsfunktion, um einen OpenSSL RSA-Schlüssel in ein UA_ByteString zu konvertieren
+UA_ByteString evpKeyToUAByteString(EVP_PKEY* evpKey) {
+    unsigned char* keyData = NULL;
+    int keyLength = i2d_PrivateKey(evpKey, &keyData);
+
+    UA_ByteString byteString;
+    byteString.data = keyData;
+    byteString.length = keyLength;
+
+    return byteString;
+}
+
+// Hilfsfunktion, um ein X509 Zertifikat in ein UA_ByteString zu konvertieren
+UA_ByteString x509ToUAByteString(X509* cert) {
+    unsigned char* certData = NULL;
+    int certLength = i2d_X509(cert, &certData);
+
+    UA_ByteString byteString;
+    byteString.data = certData;
+    byteString.length = certLength;
+
+    return byteString;
+}
+
+//Funktion zum Erstellen eines selbstsignierten Zertifikats für die Verbindung mit Username und Passwort (Security = 2)
+void generateSelfSignedCertificate(UA_ByteString& certificate, UA_ByteString& privateKey, std::string applicationURI) {
+    // Initialisiere OpenSSL
+    OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CONFIG, NULL);
+    ERR_load_crypto_strings();
+    OpenSSL_add_all_algorithms();
+    RAND_poll();
+
+    // Erstelle EVP_PKEY für Private Key
+    EVP_PKEY* pkey = EVP_PKEY_new();
+    if (!pkey) {
+        std::cerr << "Fehler beim Erstellen von EVP_PKEY." << std::endl;
+        return;
+    }
+    // Generiere RSA Schlüssel
+    RSA* rsa = RSA_new();
+    BIGNUM* bn = BN_new();
+    BN_set_word(bn, RSA_F4);
+
+    if (RSA_generate_key_ex(rsa, 2048, bn, NULL) != 1) {
+        std::cerr << "Fehler beim Erstellen des RSA Keys." << std::endl;
+        BN_free(bn);
+        RSA_free(rsa);
+        return;
+    }
+    BN_free(bn);
+    EVP_PKEY_assign_RSA(pkey, rsa);
+
+    // Erstelle X509 Zertifikat
+    X509* x509 = X509_new();
+    if (!x509) {
+        std::cerr << "Fehler beim Erstellen des X509 Zertifikats: " << ERR_error_string(ERR_get_error(), NULL) << std::endl;
+        EVP_PKEY_free(pkey);
+        return;
+    }
+    //Setze Seriennummer und Gültigkeiten
+    ASN1_INTEGER_set(X509_get_serialNumber(x509), 1);
+    X509_gmtime_adj(X509_get_notBefore(x509), 0);
+    X509_gmtime_adj(X509_get_notAfter(x509), 3153600000L);
+    //Ordner pkey dem Zertifikat zu
+    X509_set_pubkey(x509, pkey);
+
+    //Setze den SubjectName
+    X509_NAME* name = X509_get_subject_name(x509);
+    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC,
+        (unsigned char*)"DE", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC,
+        (unsigned char*)"Siemens", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+        (unsigned char*)"OPCua", -1, -1, 0);
+    X509_set_issuer_name(x509, name);
+
+    // Ertstelle GENERAL_NAMES Struktur für SAN
+    GENERAL_NAMES* san_names = sk_GENERAL_NAME_new_null();
+    if (!san_names) {
+        return;
+    }
+    // Erstelle einen GENERAL_NAME für den URI SAN-Eintrag
+    GENERAL_NAME* san_name = GENERAL_NAME_new();
+    if (!san_name) {
+        sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);
+        return;
+    }
+    //Setze den SAN-Eintrag auf URI
+    san_name->type = GEN_URI;
+    san_name->d.uniformResourceIdentifier = ASN1_IA5STRING_new();
+    if (!san_name->d.uniformResourceIdentifier) {
+        GENERAL_NAME_free(san_name);
+        sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);
+        return;
+    }
+    ASN1_STRING_set(san_name->d.uniformResourceIdentifier, applicationURI.c_str(), applicationURI.length());
+
+    // Füge den GENERAL_NAME zu GENERAL_NAMES hinzu
+    sk_GENERAL_NAME_push(san_names, san_name);
+
+    // Erstelle X509 Extension für den SAN
+    X509_EXTENSION* extension_san = X509V3_EXT_i2d(NID_subject_alt_name, 0, san_names);
+    if (!extension_san) {
+        std::cerr << "Error creating X509 extension: " << ERR_error_string(ERR_get_error(), NULL) << std::endl;
+        sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);
+        return;
+    }
+
+    // Füge die Extensio dem Zertifikat hinzu
+    if (X509_add_ext(x509, extension_san, -1) != 1) {
+        std::cerr << "Error adding X509 extension: " << ERR_error_string(ERR_get_error(), NULL) << std::endl;
+        X509_EXTENSION_free(extension_san);
+        sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);
+        return;
+    }
+
+    //Speicher freigeben
+    X509_EXTENSION_free(extension_san);
+    sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);
+ 
+
+    //Signieren des Zertifikats
+    if (X509_sign(x509, pkey, EVP_sha256()) <= 0) {
+        std::cerr << "X509_sign failed: " << ERR_error_string(ERR_get_error(), NULL) << std::endl;
+        ERR_print_errors_fp(stderr);
+        X509_free(x509);
+        EVP_PKEY_free(pkey);
+        return;
+    }
+
+    //Konvertieren der Zertifikate in UA_ByteStrings
+    certificate = x509ToUAByteString(x509);
+    privateKey = evpKeyToUAByteString(pkey);
+
+    //Speicher freigeben
+    EVP_PKEY_free(pkey);
+    X509_free(x509);
+}
+
 //Ablauf in Main-Methode
 int main(int argc, char** argv)
 {
+   printf("Programm gestartet\n");
    pthread_mutex_init(&s_mutex, NULL);
    pthread_mutex_init(&s_mutex_event, NULL);
    pthread_mutex_init(&s_mutex_log, NULL);
-
    pthread_t edgedata_thread_nr;
    int ret;
 
@@ -474,67 +617,60 @@ int main(int argc, char** argv)
    UA_ClientConfig* config = UA_Client_getConfig(client);
    UA_ClientConfig_setDefault(config);
 
-   //OPC UA Securityeinstellungen setzen falls verwendet
+    // Standardmäßig keine Sicherheit verwenden
+   config->securityMode = UA_MESSAGESECURITYMODE_NONE;
+   config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#None");
+
+   //OPC UA Securityeinstellungen für Nutzung von Username und Passwort
+   if (Info::Security == 2) 
+   {
+       config->securityMode = UA_MESSAGESECURITYMODE_SIGN;
+       config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256");
+       config->clientDescription.applicationUri = UA_String_fromChars("urn:SIMATIC.S7-1500.OPC-UA.Application:Default");
+       // Generiere ein selbstsigniertes Zertifikat
+       UA_ByteString certificate = UA_STRING_NULL;
+       UA_ByteString privateKey = UA_STRING_NULL;
+       std::string applicationURI = "urn:SIMATIC.S7-1500.OPC-UA.Application:Default";
+       generateSelfSignedCertificate(certificate, privateKey, applicationURI);
+       UA_ClientConfig_setDefaultEncryption(config, certificate, privateKey, nullptr, 0, nullptr, 0);
+   }
+
+   //OPC UA Securityeinstellungen für Nutzung von Zertifikaten und Username und Passwort
    if (Info::Security == 3) 
    {
-       //Setzen der ApplicationURI
-       config->clientDescription.applicationUri = UA_String_fromChars(Info::ApplicationURI.c_str());
-       // Umwandeln der Dateipfade in UA_ByteStrings
-       std::string certPath = "/cert/" + Info::NameClientCert;
-       std::string keyPath = "/cert/" + Info::NameClientKey;
-       std::string caPath = "/cert/" + Info::NameCertAuth;
-       UA_ByteString certificate = loadFile(certPath.c_str());
-       UA_ByteString privateKey = loadFile(keyPath.c_str());
-       UA_ByteString trustListArray[] = { loadFile(caPath.c_str()) };
-       size_t trustListSize = sizeof(trustListArray) / sizeof(trustListArray[0]);
-       UA_ByteString* revocationList = NULL;
+        //Setzen der ApplicationURI
+        config->clientDescription.applicationUri = UA_String_fromChars(Info::ApplicationURI.c_str());
+        // Umwandeln der Dateipfade in UA_ByteStrings
+        std::string certPath = "/cert/" + Info::NameClientCert;
+        std::string keyPath = "/cert/" + Info::NameClientKey;
+        std::string caPath = "/cert/" + Info::NameCertAuth;
+        UA_ByteString certificate = loadFile(certPath.c_str());
+        UA_ByteString privateKey = loadFile(keyPath.c_str());
+        UA_ByteString trustListArray[] = { loadFile(caPath.c_str()) };
+        size_t trustListSize = sizeof(trustListArray) / sizeof(trustListArray[0]);
+        UA_ByteString* revocationList = NULL;
 
-       // Überprüfen der Existenz der Zertifikatdateien
-       if (!fileExists(certPath.c_str())) 
-       {
-           std::cout << "Client Zertifikat nicht gefunden!" << std::endl;
-       }
-       if (!fileExists(keyPath.c_str()))
-       {
-           std::cout << "Privaten Schlüssel des Clients nicht gefunden!" << std::endl;
-       }
-       if (!fileExists(caPath.c_str()))
-       {
-           std::cout << "Zertifikatsauthorität nicht gefunden!" << std::endl;
-       }
-       else 
-       {
-           // Verifiziere ob Client-Zertifikat und Key zusammenpassen
-           if (!verifyCertificateAndKey(certPath.c_str(), keyPath.c_str()))
-           {
-               std::cout << "Zertifikat und privater Schlüssel stimmen nicht überein! Es wird versuhcht ohne Verschlüsselung eine Verbindung aufzubauen." << std::endl;
-           }
-           // Verifiziere ob Client-Zertifikat und CA zusammenpassen
-           else if (!verifyCACertificate(caPath.c_str(), certPath.c_str())) {
-               std::cout << "CA-Zertifikat ist ungültig! Es wird versuhcht ohne Verschlüsselung eine Verbindung aufzubauen." << std::endl;
-           }
-           //Falls ja, Encryption mit Zertifikaten setzen
-           else 
-           {
-               config->securityMode = UA_MESSAGESECURITYMODE_SIGNANDENCRYPT;
-               config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256");
+        // Verifiziere ob Client-Zertifikat und Key zusammenpassen
+        if (!verifyCertificateAndKey(certPath.c_str(), keyPath.c_str()))
+        {
+            std::cout << "Zertifikat und privater Schlüssel stimmen nicht überein! Es wird versuhcht ohne Verschlüsselung eine Verbindung aufzubauen." << std::endl;
+        }
+        // Verifiziere ob Client-Zertifikat und CA zusammenpassen
+        else if (!verifyCACertificate(caPath.c_str(), certPath.c_str())) {
+            std::cout << "CA-Zertifikat ist ungültig! Es wird versuhcht ohne Verschlüsselung eine Verbindung aufzubauen." << std::endl;
+        }
+        //Falls ja, Encryption mit Zertifikaten setzen
+        else 
+        {
+            config->securityMode = UA_MESSAGESECURITYMODE_SIGNANDENCRYPT;
+            config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256");
 
-               // Setzen der Verschlüsselung
-               UA_StatusCode retval = UA_ClientConfig_setDefaultEncryption(
-                   config,
-                   certificate,
-                   privateKey,
-                   trustListArray,
-                   trustListSize,
-                   revocationList,
-                   0
-               );
-
-               if (retval != UA_STATUSCODE_GOOD) {
-                   std::cout << "Fehler beim Setzen der Verschlüsselung: " << retval << std::endl;
-               }
-           }
-       }
+            // Setzen der Verschlüsselung
+            UA_StatusCode retval = UA_ClientConfig_setDefaultEncryption(config, certificate, privateKey, trustListArray, trustListSize, revocationList, 0);
+            if (retval != UA_STATUSCODE_GOOD) {
+                std::cout << "Fehler beim Setzen der Verschlüsselung: " << retval << std::endl;
+            }
+        }    
    }
 
    //Thread erstellen der edgedata_task aufruft
@@ -543,8 +679,6 @@ int main(int argc, char** argv)
       printf("Fehler beim Erstellen des Threads\n");
       return 1;
    }
-
-   printf("Programm gestartet\n");
 
    //Ausgabe der eingelesenen Informationen zu IP und DB Nummern
    std::cout << "\nName DBS8anS7: " << Info::DBS8anS7 << std::endl;
