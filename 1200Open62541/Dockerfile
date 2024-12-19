@@ -24,7 +24,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib
 ENV CPLUS_INCLUDE_PATH=/usr/local/include
 
 # Kompilieren des Projekts mit Open62541
-RUN g++ -std=c++11 -Wcpp -Wno-psabi -Wno-format \
+RUN g++ -std=c++17 -Wcpp -Wno-psabi -Wno-format \
     -I /usr/local/include -I /edgedataapi/include -I /open62541/include -I /cert \
     -L /usr/local/lib -o /siapp /src/siapp.cpp /edgedataapi/src/edgedata.cpp -lopen62541 \
     -lfcgi -lpthread -lssl -lcrypto
@@ -40,6 +40,7 @@ COPY --from=build /siapp /siapp
 COPY --from=build /cert /cert
 
 RUN if [ -f /cert/*.der ]; then chmod 644 /cert/*.der; fi
+RUN if [ -f /cert/Key.pem ]; then chmod 600 /cert/Key.pem; fi
 
 # Datei ausführbar machen
 RUN chmod +x /siapp
