@@ -24,6 +24,10 @@
 |  If not, see  http://www.gnu.org/licenses/                                   |
 |=============================================================================*/
 #include "s7_isotcp.h"
+#include <cstdio>
+#include "snap_msgsock.h"
+#include "s7_types.h"
+#include "snap_sysutils.h"
 //---------------------------------------------------------------------------
 TIsoTcpSocket::TIsoTcpSocket()
 {
@@ -297,15 +301,49 @@ int TIsoTcpSocket::isoRecvBuffer(void *Data, int & Size)
 	return Result;
 }
 //---------------------------------------------------------------------------
+// int TIsoTcpSocket::isoExchangeBuffer(void *Data, int &Size)
+// {
+// 	int Result;
+
+//     ClrIsoError();
+// 	Result =isoSendBuffer(Data, Size);
+// 	if (Result==0)
+// 		Result =isoRecvBuffer(Data, Size);
+// 	return Result;
+// }
 int TIsoTcpSocket::isoExchangeBuffer(void *Data, int &Size)
 {
-	int Result;
+    int Result;
 
     ClrIsoError();
-	Result =isoSendBuffer(Data, Size);
-	if (Result==0)
-		Result =isoRecvBuffer(Data, Size);
-	return Result;
+    PS7ReqHeader pduheader = (PS7ReqHeader)&PDU.Payload; // PDU-Header extrahieren
+    int PDUTypeSend = pduheader->PDUType;
+    int PDUTypeSequence = pduheader->Sequence;
+
+    Result = isoSendBuffer(Data, Size); // Anfrage senden
+    if (Result == 0)
+    {
+        bool SequenceMatch = false;
+        while (!SequenceMatch && Result == 0)
+        {
+            Result = isoRecvBuffer(Data, Size); // Antwort empfangen
+            if (Result == 0)
+            {
+                if (pduheader->PDUType == PduType_response &&
+                    pduheader->Sequence == PDUTypeSequence)
+                {
+                    SequenceMatch = true; // Sequenz stimmt überein
+                }
+                else
+                {
+                    longword tick = SysGetTick();  // Get current tick
+                    printf("PDU Rejected! Time: %lu, pduheader->PDUType: %d, pduheader->Sequence: %d, waiting for sequence %d for PDUType %d\n", 
+                            tick, pduheader->PDUType, pduheader->Sequence, PDUTypeSequence, PDUTypeSend);
+                }
+            }
+        }
+    }
+    return Result;
 }
 //---------------------------------------------------------------------------
 bool TIsoTcpSocket::IsoPDUReady()

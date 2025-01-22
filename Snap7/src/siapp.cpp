@@ -37,7 +37,6 @@ static void edgedata_callback(T_EDGE_DATA* event);
 
 static pthread_mutex_t s_mutex;
 static pthread_mutex_t s_mutex_event;
-static pthread_mutex_t s_mutex_log;
 
 static vector<T_EDGE_DATA*> s_read_list, s_write_list;
 
@@ -55,7 +54,7 @@ static vector<T_EDGE_EVENT> event_list;
 
 //---FUNKTIONEN AUS SIAPP SDK BEISPIELEN---//---FUNCTIONS OUT OF SIAPP SDK EXAMPLES---//
 
-//Konvertiere String in einen EDGE_DATA_VALUE
+// Konvertiere String in einen EDGE_DATA_VALUE
 static void convert_str_to_value(E_EDGE_DATA_TYPE type, const char* in, T_EDGE_DATA* out)
 {
    switch (type)
@@ -85,7 +84,7 @@ static void convert_str_to_value(E_EDGE_DATA_TYPE type, const char* in, T_EDGE_D
    }
 }
 
-//Konvertiere EDGE_DATA_QUALITY in einen Integer
+// Konvertiere EDGE_DATA_QUALITY in einen Integer
 static void convert_quality_str_to_value(const char* in, T_EDGE_DATA* out)
 {
    uint32_t quality = EDGE_QUALITY_VALID_VALUE;
@@ -116,7 +115,7 @@ static void convert_quality_str_to_value(const char* in, T_EDGE_DATA* out)
    out->quality = quality;
 }
 
-//Konvertiere EDGE_DATA_VALUE in einen String
+// Konvertiere EDGE_DATA_VALUE in einen String
 static std::string convert_value_to_str(T_EDGE_DATA_VALUE value, E_EDGE_DATA_TYPE type)
 {
     std::string out_value;
@@ -149,7 +148,7 @@ static std::string convert_value_to_str(T_EDGE_DATA_VALUE value, E_EDGE_DATA_TYP
     return out_value;
 }
 
-//EdgeDataCallback für abonnierte Topics
+// EdgeDataCallback für abonnierte Topics
 static void edgedata_callback(T_EDGE_DATA* event)
 {
     pthread_mutex_lock(&s_mutex_event);
@@ -175,10 +174,10 @@ static void edgedata_callback(T_EDGE_DATA* event)
     pthread_mutex_unlock(&s_mutex_event);
 }
 
-//Variable zum Warten auf Verbindung mit EdgeDataAPI
+// Variable zum Warten auf Verbindung mit EdgeDataAPI
 bool edge_data_sync = false;
 
-//Synchronisieren mit der EdgeDataAPI
+// Synchronisieren mit der EdgeDataAPI
 void* edgedata_task(void* void_ptr)
 {
    sleep(1);
@@ -214,7 +213,7 @@ void* edgedata_task(void* void_ptr)
          {
             break;
          }
-         //Daten einmal pro Sekunde updaten
+         // Daten einmal pro Sekunde updaten
          pthread_mutex_unlock(&s_mutex);
          usleep(1000000);
          pthread_mutex_lock(&s_mutex);
@@ -226,13 +225,13 @@ void* edgedata_task(void* void_ptr)
    return 0;
 }
 
-//Funktion zum Aktualisieren der Daten von S7 an SICAM8 auf dem Edge Data API
+// Funktion zum Aktualisieren der Daten von S7 an SICAM8 auf dem Edge Data API
 bool processS7toSICAM8Data(vector<T_EDGE_DATA*> parsed_values)
 {
    vector<T_EDGE_DATA*> parsed_data = parsed_values;
    for (uint32_t i = 0; i < parsed_data.size(); i++)
    {
-      //Anfang kritischer Abschnitt
+      // Anfang kritischer Abschnitt
       pthread_mutex_lock(&s_mutex);
       for (int w = 0; w < s_write_list.size(); w++)
       {
@@ -244,7 +243,7 @@ bool processS7toSICAM8Data(vector<T_EDGE_DATA*> parsed_values)
             edge_data_sync_write(&s_write_list[w]->handle, 1);
          }
       }
-      //Verlasse kritischen Abschnitt
+      // Verlasse kritischen Abschnitt
       pthread_mutex_unlock(&s_mutex);
    }
    return true;
@@ -283,17 +282,17 @@ std::map<std::string, std::tuple<float, uint32_t, std::string, int, int>> proces
    return SICAM8toS7Information;
 }
 
-//Ablauf in Main-Methode
+// Ablauf in Main-Methode
 int main(int argc, char** argv)
 {
+   printf("Programm gestartet\n");
    pthread_mutex_init(&s_mutex, NULL);
    pthread_mutex_init(&s_mutex_event, NULL);
-   pthread_mutex_init(&s_mutex_log, NULL);
 
    pthread_t edgedata_thread_nr;
    int ret;
 
-   //Thread erstellen der edgedata_task aufruft
+   // Thread erstellen der edgedata_task aufruft
    if (pthread_create(&edgedata_thread_nr, NULL, edgedata_task, &ret))
    {
       printf("Fehler beim Erstellen des Threads\n");
@@ -302,8 +301,6 @@ int main(int argc, char** argv)
 
    //Deklaration eines Snap7 Clients
    TS7Client Client;
-
-   printf("Programm gestartet\n");
 
    //Ausgabe der eingelesenen Informationen zu IP und DB Nummern
    std::cout << "\nNrDBS8anS7: " << Info::DBS8anS7 << std::endl;
@@ -331,7 +328,7 @@ int main(int argc, char** argv)
    // Variable für den Verbindungsstatus
    bool verbunden = false;
 
-   //Lege Liste mit Topics, Datentypen und Adressen der Signale von SICAM8 an S7 an
+   // Lege Liste mit Topics, Datentypen und Adressen der Signale von SICAM8 an S7 an
    std::map<std::string, std::tuple<std::string, int, int>> SICAM8toS7Topics;
 
    // Iteriere durch die übergebene writeSignals-Liste und extrahiere die Topics, Datentypen und Adressen der Signale von SICAM8 an S7
@@ -340,7 +337,7 @@ int main(int argc, char** argv)
       SICAM8toS7Topics[signal.name] = std::make_tuple(signal.dataType, signal.byteOffset, signal.bitOffset);
    }
 
-   //Lege Liste mit Topics, Datentypen und Adressen der Signale von S7 an SICAM8 an
+   // Lege Liste mit Topics, Datentypen und Adressen der Signale von S7 an SICAM8 an
    std::map<std::string, std::tuple<std::string, int, int>> S7toSICAM8Topics;
 
    // Iteriere durch die readSignals-Liste und extrahiere die die Topics, Datentypen und Adressen der Signale von S7 an SICAM8
@@ -351,15 +348,15 @@ int main(int argc, char** argv)
 
    // Bestimme den maximalen Byte-Offset für die writeSignals
    int maxWriteByteOffset = 0;
-   for (const auto& entry : S7toSICAM8Topics) 
+   for (const auto& entry : S7toSICAM8Topics)
    {
       int byteOffset = std::get<1>(entry.second);
       int dataSize = 0;
-      if (std::get<0>(entry.second) == "Bool") 
+      if (std::get<0>(entry.second) == "Bool")
       {
             dataSize = 1;
-      } 
-      else if (std::get<0>(entry.second) == "DInt" || std::get<0>(entry.second) == "Real") 
+      }
+      else if (std::get<0>(entry.second) == "DInt" || std::get<0>(entry.second) == "Real")
       {
             dataSize = 4;
       }
@@ -368,25 +365,25 @@ int main(int argc, char** argv)
 
    // Bestimme  den maximalen Byte-Offset für die readSignals
    int maxReadByteOffset = 0;
-   for (const auto& entry : S7toSICAM8Topics) 
+   for (const auto& entry : S7toSICAM8Topics)
    {
       int byteOffset = std::get<1>(entry.second);
       int dataSize = 0;
-      if (std::get<0>(entry.second) == "Bool") 
+      if (std::get<0>(entry.second) == "Bool")
       {
             dataSize = 1;
-      } 
-      else if (std::get<0>(entry.second) == "DInt" || std::get<0>(entry.second) == "Real") 
+      }
+      else if (std::get<0>(entry.second) == "DInt" || std::get<0>(entry.second) == "Real")
       {
             dataSize = 4;
       }
       maxReadByteOffset = std::max(maxReadByteOffset, byteOffset + dataSize);
    }
 
-   //Nummer des Datenbausteins für Signale von SICAM8 an S7
+   // Nummer des Datenbausteins für Signale von SICAM8 an S7
    int dbNumber1 = std::stoi(Info::DBS8anS7);
 
-   //Nummer des Datenbausteins für Signale von SICAM8 an S7
+   // Nummer des Datenbausteins für Signale von SICAM8 an S7
    int dbNumber2 = std::stoi(Info::DBS7anS8);
 
    // Warte bei erstem Verbinden, bis EdgeDataAPI verbunden und synchronisiert ist
@@ -395,28 +392,28 @@ int main(int argc, char** argv)
         usleep(1000000);
     }
 
-   //While-Schleife damit bei Verbindungsabbruch erneut versucht wird eine Verbindung herzustellen
+   // While-Schleife damit bei Verbindungsabbruch erneut versucht wird eine Verbindung herzustellen
    while(true)
    {
-      //While-Schleife zum Verbindung herstellen
+      // While-Schleife zum Verbindung herstellen
       while (!verbunden)
       {
          // Versuche Verbindung zur SPS herzustellen
          if (Client.ConnectTo(Info::IPadresse.c_str(), Info::RackNr, Info::SlotNr) == 0)
          {
-            //Bei Erfolg verbunden auf true setzt und Rest des Programms fortsetzen
+            // Bei Erfolg verbunden auf true setzt und Rest des Programms fortsetzen
             std::cout << "Verbindung zur SPS hergestellt!" << std::endl;
             verbunden = true;
          }
          else
          {
-            //Bei Misserfolg nach 10 Sekunden erneut versuchen
+            // Bei Misserfolg nach 10 Sekunden erneut versuchen
             std::cerr << "Verbindung zur SPS fehlgeschlagen. Erneuter Versuch in 10 Sekunden..." << std::endl;
             usleep(10000000);
          }
       }
 
-      //While-Schleife zum Lesen und Schreiben von Daten während die SPS verbunden ist
+      // While-Schleife zum Lesen und Schreiben von Daten während die SPS verbunden ist
       while (verbunden)
       {
          // Überprüfen, ob die Verbindung zur SPS besteht
@@ -431,37 +428,37 @@ int main(int argc, char** argv)
          // Aufrufen der Funktion zum Einlesen der Daten der extrahierten Topics
          std::map<std::string, std::tuple<float, uint32_t, std::string, int, int>> SICAM8toS7Data = processSICAM8toS7Topics(SICAM8toS7Topics);
 
-         // Erstellen Sie einen Puffer für die gesammelten Daten
+         // Erstelle einen Puffer für die gesammelten Daten
          std::vector<uint8_t> writeDataBuffer(maxWriteByteOffset, 0);
 
-         // Füllen Sie den WritePuffer mit den Werten aus SICAM8toS7Data
-         for (const auto &entry : SICAM8toS7Data) 
+         // Fülle den WritePuffer mit den Werten aus SICAM8toS7Data
+         for (const auto &entry : SICAM8toS7Data)
          {
             float value = std::get<0>(entry.second);
             std::string dataType = std::get<2>(entry.second);
             int byteOffset = std::get<3>(entry.second);
             int bitOffset = std::get<4>(entry.second);
 
-            if (dataType == "Bool") 
+            if (dataType == "Bool")
             {
                bool boolValue = static_cast<bool>(value);
-               if (boolValue) 
+               if (boolValue)
                {
                      writeDataBuffer[byteOffset] |= (1 << bitOffset);
-               } else 
+               } else
                {
                      writeDataBuffer[byteOffset] &= ~(1 << bitOffset);
                }
-            } 
-            else if (dataType == "DInt") 
+            }
+            else if (dataType == "DInt")
             {
                uint32_t dintValue = static_cast<uint32_t>(value);
                writeDataBuffer[byteOffset] = (dintValue >> 24) & 0xFF;
                writeDataBuffer[byteOffset + 1] = (dintValue >> 16) & 0xFF;
                writeDataBuffer[byteOffset + 2] = (dintValue >> 8) & 0xFF;
                writeDataBuffer[byteOffset + 3] = dintValue & 0xFF;
-            } 
-            else if (dataType == "Real") 
+            }
+            else if (dataType == "Real")
             {
                uint32_t intValue = *reinterpret_cast<uint32_t*>(&value);
                 writeDataBuffer[byteOffset] = (intValue >> 24) & 0xFF;
@@ -475,24 +472,27 @@ int main(int argc, char** argv)
          if (Client.DBWrite(dbNumber1, 0, writeDataBuffer.size(), writeDataBuffer.data()) !=0)
          {
             std::cerr << "Fehler beim Schreiben der Daten in die SPS" << std::endl;
+            verbunden = false;
+            break;
          }
-
-         //Gebe den WriteBuffer frei
+         // Gebe den WriteBuffer frei
          writeDataBuffer.clear();
 
-         //Erstellen eines Vektors mit Datenpaketen, die ausgegeben werden sollen
+         // Erstellen eines Vektors mit Datenpaketen, die ausgegeben werden sollen
          vector<T_EDGE_DATA*> S7toSICAM8Data;
 
          // Erstellen Sie einen Puffer für die eingelesenen Daten
          std::vector<uint8_t> readDataBuffer(maxReadByteOffset, 0);
 
          // Lese alle Daten in einem Aufruf aus der SPS in den ReadBuffer
-         if (Client.DBRead(dbNumber2, 0, readDataBuffer.size(), readDataBuffer.data()) != 0) 
+         if (Client.DBRead(dbNumber2, 0, readDataBuffer.size(), readDataBuffer.data()) != 0)
          {
             std::cerr << "Fehler beim Lesen der Daten aus der SPS" << std::endl;
+            verbunden = false;
+            break;
          }
 
-         //for-Schleife zum Einlesen der Werte in S7toSICAM8Data
+         // for-Schleife zum Einlesen der Werte in S7toSICAM8Data
          for (const auto& entry : S7toSICAM8Topics)
          {
             std::string topic = entry.first;
@@ -514,31 +514,31 @@ int main(int argc, char** argv)
                int byteOffset = std::get<1>(entry.second);
                int bitOffset = std::get<2>(entry.second);
 
-               if (dataType == "Bool") 
+               if (dataType == "Bool")
                {
                   value = static_cast<float>((readDataBuffer[byteOffset] & (1 << bitOffset)) != 0);
-               } 
-               else if (dataType == "DInt") 
+               }
+               else if (dataType == "DInt")
                {
                   uint32_t dintValue = (static_cast<uint32_t>(readDataBuffer[byteOffset]) << 24) |
                                        (static_cast<uint32_t>(readDataBuffer[byteOffset + 1]) << 16) |
                                        (static_cast<uint32_t>(readDataBuffer[byteOffset + 2]) << 8) |
                                        (static_cast<uint32_t>(readDataBuffer[byteOffset + 3]));
                   value = static_cast<float>(dintValue);
-               } 
-               else if (dataType == "Real") 
+               }
+               else if (dataType == "Real")
                {
                   uint32_t intValue =  (static_cast<uint32_t>(readDataBuffer[byteOffset]) << 24) |
                                        (static_cast<uint32_t>(readDataBuffer[byteOffset + 1]) << 16) |
                                        (static_cast<uint32_t>(readDataBuffer[byteOffset + 2]) << 8) |
                                        (static_cast<uint32_t>(readDataBuffer[byteOffset + 3]));
                 value = *reinterpret_cast<float*>(&intValue);
-               } 
-               else 
+               }
+               else
                {
                   std::cerr << "Unbekannter Datentyp für " << entry.first << std::endl;
                }
-               
+
                //Anlegen eines neuen Eintrags
                T_EDGE_DATA new_entry;
                E_EDGE_DATA_TYPE type = E_EDGE_DATA_TYPE_UNKNOWN;
@@ -574,7 +574,6 @@ int main(int argc, char** argv)
                printf("Kein Handle fuer Topic %s gefunden\n", entry.first.c_str());
             }
          }
-
          //Gebe den ReadBuffer frei
          readDataBuffer.clear();
 
