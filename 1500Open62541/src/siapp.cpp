@@ -28,6 +28,7 @@
 #include <chrono>
 #include <mutex>
 #include <shared_mutex>
+#include <iomanip>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
@@ -1093,7 +1094,6 @@ int main(int argc, char** argv)
             {
                 // Bei Misserfolg nach 10 Sekunden erneut versuchen eine Verbindung aufzubauen
                 std::cerr << "Verbindung zum OPC UA Server fehlgeschlagen. Erneuter Versuch in 10 Sekunden..." << std::endl;
-                restartCounter++;
                 usleep(10000000);
             }
         }
