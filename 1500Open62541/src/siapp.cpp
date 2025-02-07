@@ -873,7 +873,7 @@ int main(int argc, char** argv)
     }
 
     // OPC UA Securityeinstellungen für Nutzung von Username und Passwort mit Message Mode None
-    if (Info::Auth == 1 && Info::MessagingMode == 0)
+    if (Info::Authentification == 1 && Info::MessagingMode == 0)
     {
             // Setzen einer DefaultApplicationURI
             config->clientDescription.applicationUri = UA_String_fromChars("urn:SIMATIC.S7-1200.OPC-UA.Application:Default");
@@ -917,15 +917,15 @@ int main(int argc, char** argv)
             std:: string applicationURI = getApplicationURI(certPath.c_str());
             config->clientDescription.applicationUri =  UA_String_fromChars(applicationURI.c_str());
 
-            if (Info::Encryption == 1)
+            if (Info::SP == 1)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15");}
-            else if (Info::Encryption == 2)
+            else if (Info::SP == 2)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic256");}
-            else if (Info::Encryption == 3)
+            else if (Info::SP == 3)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256");}
-            else if (Info::Encryption == 4)
+            else if (Info::SP == 4)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep");}
-            else if (Info::Encryption == 5)
+            else if (Info::SP == 5)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss");}
 
             // Updaten der Verschlüsselung
@@ -991,7 +991,7 @@ int main(int argc, char** argv)
                 status = UA_Client_connect(client, opcUrl.c_str());
             }
             // Anmeldung mit Benutzername und Passwort
-            else if (Info:Authentification == 1)
+            else if (Info::Authentification == 1)
             {
                 // Adresse und Username einlesen und Passwort entschlüsseln
                 std::string opcUrl = "opc.tcp://" + Info::IPadresse + ":4840";
