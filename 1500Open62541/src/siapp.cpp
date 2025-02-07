@@ -856,28 +856,40 @@ int main(int argc, char** argv)
     config->secureChannelLifeTime = 3600000;
     config->requestedSessionTimeout = 30000;
 
-    // Standardmäßig keine Sicherheit verwenden
-    config->securityMode = UA_MESSAGESECURITYMODE_NONE;
-    config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#None");
+    // Messaging Mode setzen
+    if (Info::MessagingMode == 0)
+    {
+        config->securityMode = UA_MESSAGESECURITYMODE_NONE;
+        // Mit Messasing Mode None ist nur diese SecurityPolicy möglich
+        config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#None");
+    }
+    else if (Info::MessagingMode == 1)
+    {
+        config->securityMode = UA_MESSAGESECURITYMODE_SIGN;
+    }
+    else if (Info::MessagingMode == 2)
+    {
+        config->securityMode = UA_MESSAGESECURITYMODE_SIGNANDENCRYPT;
+    }
 
-    //OPC UA Securityeinstellungen für Nutzung von Username und Passwort
-    if (Info::Security == 2)
+    // OPC UA Securityeinstellungen für Nutzung von Username und Passwort mit Message Mode None
+    if (Info::Auth == 1 && Info::MessagingMode == 0)
     {
             // Setzen einer DefaultApplicationURI
-            config->clientDescription.applicationUri = UA_String_fromChars("urn:SIMATIC.S7-1500.OPC-UA.Application:Default");
+            config->clientDescription.applicationUri = UA_String_fromChars("urn:SIMATIC.S7-1200.OPC-UA.Application:Default");
 
             // Generiere ein selbstsigniertes Zertifikat mit Key
             UA_ByteString certificate = UA_STRING_NULL;
             UA_ByteString privateKey = UA_STRING_NULL;
-            std::string applicationURI = "urn:SIMATIC.S7-1500.OPC-UA.Application:Default";
+            std::string applicationURI = "urn:SIMATIC.S7-1200.OPC-UA.Application:Default";
             generateSelfSignedCertificate(certificate, privateKey, applicationURI);
 
             // Setzen des selbstsignierten Zertifikats und Keys
             UA_ClientConfig_setDefaultEncryption(config, certificate, privateKey, nullptr, 0, nullptr, 0);
     }
 
-    //OPC UA Securityeinstellungen für Nutzung von Zertifikaten und Username und Passwort
-    if (Info::Security == 3)
+    // OPC UA Zertifikate laden und SecurityPolicy setzen für Messaging Mode Sign und Sign&Encrypt
+    if (Info::MessagingMode == 1 || Info::MessagingMode == 2)
     {
         // Laden und umwandeln der Dateien in UA_ByteStrings
         std::string certPath = "/cert/ClientCert.der";
@@ -899,12 +911,11 @@ int main(int argc, char** argv)
         {
             std::cout << "CA-Zertifikat ist ungültig! Es wird versucht ohne Verschlüsselung eine Verbindung aufzubauen." << std::endl;
         }
-        //Falls ja, Encryption mit Zertifikaten, ApplicationUri wie im Client-Zertifikat und SecurityPolicyURI je nach Auswahl setzen
+        // Falls ja, ApplicationURI wie im Client-Zertifikat und SecurityPolicyURI je nach Auswahl setzen
         else
         {
             std:: string applicationURI = getApplicationURI(certPath.c_str());
             config->clientDescription.applicationUri =  UA_String_fromChars(applicationURI.c_str());
-            config->securityMode = UA_MESSAGESECURITYMODE_SIGNANDENCRYPT;
 
             if (Info::Encryption == 1)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15");}
@@ -972,17 +983,17 @@ int main(int argc, char** argv)
             }
             // Versuche Verbindung zum OPC UA Server herzustellen
             UA_StatusCode status;
-            // Falls keine Security (Security = 1) ausgewählt:
-            if (Info::Security == 1)
+            // Anonyme Anmeldung
+            if (Info::Authentification == 0)
             {
                 // Verbindung ohne Username und Passwort herstellen
                 std::string opcUrl = "opc.tcp://" + Info::IPadresse + ":4840";
                 status = UA_Client_connect(client, opcUrl.c_str());
             }
-            // Sonst (Security = 2 oder 3):
-            else
+            // Anmeldung mit Benutzername und Passwort
+            else if (Info:Authentification == 1)
             {
-                // Adresse und Username einlesen und Passworr entschlüsseln
+                // Adresse und Username einlesen und Passwort entschlüsseln
                 std::string opcUrl = "opc.tcp://" + Info::IPadresse + ":4840";
                 std::string username = Info::Username;
 
