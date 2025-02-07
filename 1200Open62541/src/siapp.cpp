@@ -873,7 +873,7 @@ int main(int argc, char** argv)
     }
     
     // OPC UA Securityeinstellungen für Nutzung von Username und Passwort mit Message Mode None
-    if (Info::Auth == 1 && Info::MessagingMode == 0)
+    if (Info::Authentification == 1 && Info::MessagingMode == 0)
     {
             // Setzen einer DefaultApplicationURI
             config->clientDescription.applicationUri = UA_String_fromChars("urn:SIMATIC.S7-1200.OPC-UA.Application:Default");
@@ -991,7 +991,7 @@ int main(int argc, char** argv)
                 status = UA_Client_connect(client, opcUrl.c_str());
             }
             // Anmeldung mit Benutzername und Passwort
-            else if (Info:Authentification == 1)
+            else if (Info::Authentification == 1)
             {
                 // Adresse und Username einlesen und Passwort entschlüsseln
                 std::string opcUrl = "opc.tcp://" + Info::IPadresse + ":4840";
