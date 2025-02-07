@@ -917,15 +917,15 @@ int main(int argc, char** argv)
             std:: string applicationURI = getApplicationURI(certPath.c_str());
             config->clientDescription.applicationUri =  UA_String_fromChars(applicationURI.c_str());
 
-            if (Info::SP == 1)
+            if (Info::SecurityPolicy == 1)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15");}
-            else if (Info::SP == 2)
+            else if (Info::SecurityPolicy == 2)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic256");}
-            else if (Info::SP == 3)
+            else if (Info::SecurityPolicy == 3)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256");}
-            else if (Info::SP == 4)
+            else if (Info::SecurityPolicy == 4)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep");}
-            else if (Info::SP == 5)
+            else if (Info::SecurityPolicy == 5)
             {config->securityPolicyUri = UA_STRING_ALLOC("http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss");}
 
             // Updaten der Verschlüsselung
