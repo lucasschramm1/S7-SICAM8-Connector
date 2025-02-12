@@ -380,9 +380,6 @@ int main(int argc, char** argv)
       maxReadByteOffset = std::max(maxReadByteOffset, byteOffset + additionalDataSize);
    }
 
-   std::cout << maxWriteByteOffset << std::endl;
-   std::cout << maxReadByteOffset << std::endl;
-
    // Nummer des Datenbausteins für Signale von SICAM8 an S7
    int dbNumber1 = std::stoi(Info::DBS8anS7);
 
